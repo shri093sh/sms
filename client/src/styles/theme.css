@@ -1,0 +1,112 @@
+/* Design tokens ported from the original ghghkapp_3.html :root block,
+   so the React rewrite keeps the same visual identity from day one. */
+:root {
+  --bg: #0E1116;
+  --panel: #161B22;
+  --panel-2: #1C222C;
+  --border: #262C38;
+  --border-soft: #1E2430;
+  --text: #E6E9EF;
+  --text-dim: #8A93A6;
+  --text-faint: #5B6478;
+  --accent: #F2A93B;
+  --accent-ink: #241A08;
+  --sync-live: #34D399;
+  --sync-pending: #F5A93B;
+  --sync-off: #5B6478;
+  --danger: #EF5A5A;
+  --radius: 14px;
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, .display {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+button { font-family: inherit; cursor: pointer; }
+a { color: inherit; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.skeleton-block {
+  border-radius: 6px;
+  background: var(--panel-2);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.empty-state {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 14px;
+}
+
+/* Phase 10 — responsive pass.
+   Layout is desktop-first (fixed sidebar) up to this point; below
+   860px the sidebar becomes an off-canvas drawer toggled from TopBar,
+   and below 640px stat grids stack into a single column instead of
+   squeezing cards unreadably. */
+@media (max-width: 860px) {
+  .app-sidebar {
+    position: fixed;
+    z-index: 40;
+    inset: 0 auto 0 0;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 2px 0 24px rgba(0, 0, 0, 0.4);
+  }
+  .app-sidebar.open {
+    transform: translateX(0);
+  }
+  .app-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 30;
+  }
+  .app-menu-btn {
+    display: inline-flex !important;
+  }
+  .app-main {
+    padding: 16px !important;
+  }
+}
+
+@media (min-width: 861px) {
+  .app-sidebar-backdrop {
+    display: none;
+  }
+}
+
+.app-menu-btn {
+  display: none !important;
+}
+
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 640px) {
+  .stat-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
