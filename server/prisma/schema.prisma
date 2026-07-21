@@ -1,0 +1,357 @@
+// Prisma schema — Phase 2: Database & Backend Foundation (core models),
+// extended in Phase 11 (Staff, TimetableSlot, PayrollRecord), Phase 12
+// (Exam, Grade, Assignment, Submission), and Phase 13 (Announcement,
+// Branch, branchId scoping on User/Student/Staff). Models for Phases
+// 14-15 (audit log...) are added when those phases are built, to keep
+// each phase's diff easy to review.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  teacher
+  accountant
+}
+
+enum StudentStatus {
+  active
+  archived
+}
+
+enum InstallmentStatus {
+  pending
+  paid
+  overdue
+}
+
+enum AttendanceStatus {
+  present
+  absent
+  late
+}
+
+enum BackupStatus {
+  success
+  failed
+}
+
+enum StaffStatus {
+  active
+  archived
+}
+
+enum SubmissionStatus {
+  pending
+  submitted
+  late
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String?
+  authProvider String   @default("local")
+  role         Role     @default(teacher)
+  isActive     Boolean  @default(true)
+  branchId     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  markedAttendance AttendanceRecord[] @relation("MarkedBy")
+  branch           Branch?            @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  announcements    Announcement[]
+  auditLogs        AuditLog[]
+
+  @@index([branchId])
+  @@map("users")
+}
+
+model Student {
+  id            String        @id @default(cuid())
+  name          String
+  rollNo        String
+  className     String
+  section       String
+  guardianName  String?
+  guardianPhone String?
+  admissionDate DateTime      @default(now())
+  status        StudentStatus @default(active)
+  branchId      String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  feePlans   FeePlan[]
+  attendance AttendanceRecord[]
+  grades     Grade[]
+  submissions Submission[]
+  branch     Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@unique([rollNo, className, section])
+  @@index([branchId])
+  @@map("students")
+}
+
+model FeePlan {
+  id                String   @id @default(cuid())
+  studentId         String
+  totalAmount       Decimal  @db.Decimal(10, 2)
+  installmentCount  Int
+  startDate         DateTime @default(now())
+  createdAt         DateTime @default(now())
+
+  student       Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  installments  Installment[]
+
+  @@map("fee_plans")
+}
+
+model Installment {
+  id         String             @id @default(cuid())
+  feePlanId  String
+  amount     Decimal            @db.Decimal(10, 2)
+  dueDate    DateTime
+  paidDate   DateTime?
+  status     InstallmentStatus  @default(pending)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  feePlan FeePlan @relation(fields: [feePlanId], references: [id], onDelete: Cascade)
+
+  @@index([status, dueDate])
+  @@map("installments")
+}
+
+model AttendanceRecord {
+  id        String            @id @default(cuid())
+  studentId String
+  date      DateTime          @db.Date
+  status    AttendanceStatus
+  markedById String?
+  createdAt DateTime          @default(now())
+
+  student  Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  markedBy User?   @relation("MarkedBy", fields: [markedById], references: [id])
+
+  @@unique([studentId, date])
+  @@map("attendance_records")
+}
+
+model Settings {
+  id             String   @id @default(cuid())
+  orgName        String   @default("Prerana SMS")
+  orgLogoUrl     String?
+  backupEnabled  Boolean  @default(false)
+  backupTime     String   @default("02:00")
+  updatedAt      DateTime @updatedAt
+
+  @@map("settings")
+}
+
+model BackupLog {
+  id        String       @id @default(cuid())
+  createdAt DateTime     @default(now())
+  fileUrl   String?
+  status    BackupStatus
+
+  @@map("backup_logs")
+}
+
+// Phase 11 — Staff, Timetable & Payroll.
+model Staff {
+  id        String      @id @default(cuid())
+  name      String
+  subject   String
+  phone     String?
+  email     String?
+  joinDate  DateTime    @default(now())
+  status    StaffStatus @default(active)
+  branchId  String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  timetableSlots TimetableSlot[]
+  payrollRecords PayrollRecord[]
+  assignments    Assignment[]
+  branch         Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@index([branchId])
+  @@map("staff")
+}
+
+// One row per (class, section, day, period) slot. `staffId` is nullable so
+// a slot can exist (subject assigned) before a teacher is picked, or be
+// cleared without deleting the row's class/subject context.
+model TimetableSlot {
+  id        String   @id @default(cuid())
+  className String
+  section   String
+  dayOfWeek Int // 0 = Monday .. 5 = Saturday (no Sunday slots)
+  period    Int // 1-based period number within the day
+  subject   String
+  staffId   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  staff Staff? @relation(fields: [staffId], references: [id], onDelete: SetNull)
+
+  @@unique([className, section, dayOfWeek, period])
+  @@index([staffId])
+  @@map("timetable_slots")
+}
+
+// One row per (staff, month). `month` is a "YYYY-MM" string rather than a
+// DateTime — payroll is inherently monthly-granular, and a plain string
+// sorts/compares/uniques correctly without timezone edge cases a DateTime
+// would introduce for a value that's never really a point in time.
+model PayrollRecord {
+  id          String    @id @default(cuid())
+  staffId     String
+  month       String
+  baseSalary  Decimal   @db.Decimal(10, 2)
+  deductions  Decimal   @db.Decimal(10, 2) @default(0)
+  netPay      Decimal   @db.Decimal(10, 2)
+  paidOn      DateTime?
+  createdAt   DateTime  @default(now())
+
+  staff Staff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([staffId, month])
+  @@map("payroll_records")
+}
+
+// Phase 12 — Academics: Exams, Grades & Homework.
+model Exam {
+  id        String   @id @default(cuid())
+  name      String
+  className String
+  date      DateTime
+  createdAt DateTime @default(now())
+
+  grades Grade[]
+
+  @@map("exams")
+}
+
+// One row per (exam, student, subject). A student's report card for an
+// exam is the set of Grade rows sharing that examId.
+model Grade {
+  id        String   @id @default(cuid())
+  examId    String
+  studentId String
+  subject   String
+  marks     Decimal  @db.Decimal(6, 2)
+  maxMarks  Decimal  @db.Decimal(6, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  exam    Exam    @relation(fields: [examId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([examId, studentId, subject])
+  @@index([studentId])
+  @@map("grades")
+}
+
+// `staffId` is nullable for the same reason as TimetableSlot.staffId — an
+// assignment can exist before a specific teacher is attributed to it.
+model Assignment {
+  id        String   @id @default(cuid())
+  className String
+  subject   String
+  title     String
+  dueDate   DateTime
+  staffId   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  staff       Staff?       @relation(fields: [staffId], references: [id], onDelete: SetNull)
+  submissions Submission[]
+
+  @@index([className])
+  @@map("assignments")
+}
+
+// One row per (assignment, student). Created lazily as `pending` when an
+// admin/teacher opens the assignment's submission tracker for a class
+// roster, then flipped to `submitted`/`late` as students turn work in.
+model Submission {
+  id           String           @id @default(cuid())
+  assignmentId String
+  studentId    String
+  submittedAt  DateTime?
+  status       SubmissionStatus @default(pending)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  student    Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([assignmentId, studentId])
+  @@map("submissions")
+}
+
+// Phase 13 — Communication & Multi-Branch.
+model Branch {
+  id        String   @id @default(cuid())
+  name      String
+  address   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users   User[]
+  students Student[]
+  staff   Staff[]
+
+  @@map("branches")
+}
+
+// `audience` is a small fixed set of role names (or "all") stored as a
+// Postgres text array rather than a join table — the list is short, rarely
+// queried by individual value, and always read as "does this user's role
+// (or admin) appear in the list" client-side after a single fetch.
+model Announcement {
+  id        String    @id @default(cuid())
+  title     String
+  body      String
+  audience  String[]  @default(["all"])
+  createdBy String
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+
+  author User @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("announcements")
+}
+
+// Phase 14 — Reports, Audit Log & Import/Export.
+//
+// Written by utils/audit.js, called from controllers around create/
+// update/archive/restore. `before`/`after` are partial snapshots (Json,
+// not the full row) — enough to show what changed in the audit table
+// without duplicating every column of every model. `userId` is nullable
+// and SetNull on delete so a deleted user's history stays intact.
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String // "create" | "update" | "archive" | "restore" | "import"
+  entityType String // "Student" | "Staff" | ...
+  entityId   String
+  before     Json?
+  after      Json?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
