@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: prerana
+      POSTGRES_PASSWORD: prerana
+      POSTGRES_DB: prerana_sms
+    ports:
+      - "5432:5432"
+    volumes:
+      - prerana_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prerana -d prerana_sms"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build: ./server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      NODE_ENV: production
+      # Client is same-origin from the browser's point of view (nginx proxies
+      # /api/* to this service — see client/nginx.conf), but CORS still needs
+      # a same-origin-looking value here for any non-proxied dev access.
+      CLIENT_ORIGIN: http://localhost:8080
+      DATABASE_URL: postgresql://prerana:prerana@postgres:5432/prerana_sms
+      # CHANGE THESE before deploying anywhere beyond your own machine — see
+      # server/.env.example and docs/DEPLOYMENT.md.
+      JWT_SECRET: dev-access-secret-change-me
+      JWT_REFRESH_SECRET: dev-refresh-secret-change-me
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      BACKUP_DIR: /app/backups
+    volumes:
+      - prerana_backups:/app/backups
+    ports:
+      - "4000:4000"
+
+  client:
+    build: ./client
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "8080:80"
+
+volumes:
+  prerana_pg_data:
+  prerana_backups:
